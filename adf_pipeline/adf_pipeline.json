@@ -1,0 +1,185 @@
+{
+    "name": "sql_to_datalake_ingestion",
+    "properties": {
+        "activities": [
+            {
+                "name": "last_load",
+                "description": "activity to check last load date",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "select last_load from water_Table;",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "AzureSqlTable1",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "water_Table"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "current_load",
+                "description": "get maximum date from current load",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "select max(Date_ID) as current_load from car_sales;",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "AzureSqlTable1",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "car_sales"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Copy_Data_from_sql_to_adls",
+                "description": "activity to copy data from sql db to bronze layer of adls gen2 ",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "last_load",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    },
+                    {
+                        "activity": "current_load",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [
+                    {
+                        "name": "last_load",
+                        "value": "string"
+                    },
+                    {
+                        "name": "current_load",
+                        "value": "string"
+                    }
+                ],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                            "value": "select * from car_sales where Date_ID > '@{activity('last_load').output.firstRow.last_load}' AND  Date_ID <= '@{activity('current_load').output.firstRow.current_load}'",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "AzureSqlTable1",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "table_name": "car_sales"
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_adls",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "Update_waterMark",
+                "description": "activity to update Watermark table with current load date",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Copy_Data_from_sql_to_adls",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[UpdateWaterTable]",
+                    "storedProcedureParameters": {
+                        "last_load": {
+                            "value": {
+                                "value": "@{activity('current_load').output.firstRow.current_load}",
+                                "type": "Expression"
+                            },
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql",
+                    "type": "LinkedServiceReference"
+                }
+            }
+        ],
+        "annotations": [],
+        "lastPublishTime": "2026-03-26T08:07:24Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}
