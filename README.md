@@ -13,7 +13,7 @@ The pipeline ingests raw data using Azure Data Factory, stores it in Azure Data 
 - PySpark 
  
 ## Architecture 
-![Architecture](architecture/pipeline_architecture.png) 
+![Architecture](architecture/End-To-End Data Pipeline Architecture Diagram.png) 
  
 ## Pipeline Workflow 
 1. Data is ingested using Azure Data Factory 
